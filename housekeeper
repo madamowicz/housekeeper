@@ -1,0 +1,156 @@
+#!/usr/bin/perl
+
+# Copyright 2014 Marcin Adamowicz <martin.adamowicz@gmail.com>
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+# http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+##### Description #####
+# I always have tons of copies of the same file all around on disk.
+# Usually same file but different names. Scripts, mp3, jpegs, docs.
+# This script is about to help me search and remove duplicates.
+
+
+BEGIN {
+##	//BEGIN//
+## Initialize & pre-configure.
+
+# Check myself for used modules before run main part.
+   open MYSELF, '<', "$0";
+   close MYSELF;
+   while (<MYSELF>) {
+      next if $_ !~ m/^use/i;
+      $module = substr $_, 4, -2;
+      die "CRITICAL! Missing module: $module" if ! eval "require $module";	
+   }
+
+# Check if configuration file exists.
+# If doesn't, create one named: {scriptname}.cfg.
+   &create_conf if ! -e "$0.cfg";
+   sub create_conf {
+      my $template = <<"EOF";
+[main]
+# Base directory path (mandatory).
+# For example: "/home/user"
+base_dir=""
+
+# List of directories to be searched (mandatory).
+# For example: "Documents/Videos"
+list_dir=""
+
+# Exclude files with suffixes (optional).
+# For example: ".iso .bkp .pdf"
+# Space separated.
+exclude_files=""
+
+# Maximal number of reports (optional).
+# How many reports to store.
+# Default is 5.
+max_age=""
+
+[report]
+# File based reports (optional). 
+# Args: yes/no
+# Default: "yes"
+on=""
+
+# Report file destination.
+# Mandatory if file report on.
+path=""
+
+# Report file name (optional).
+# Date is automatically attached to each report file (suffix).
+name=""
+
+[sql]
+# Sqlite based reports (optional). 
+# Args: yes/no 
+# Default: "no"
+on=""
+
+# Sqlite file name (optional).
+# Default: script_name.sqlite
+name=""
+
+# Path to sqlite file (optional).
+# This script location as default.
+path=""
+EOF
+
+      print "Config file $0.cfg doesn't exist.\nCreating from template...\n";
+      open CONF, '>', "$0.cfg";
+      print CONF $template;
+      close CONF;
+      print "Config file created.\n";
+      print "Update config & re-run script.\n";
+      exit 0;
+
+   }
+
+}
+##	\\BEGIN\\
+
+##	//MAIN//
+use strict;
+use warnings;
+use Config::Simple;
+use File::Find;
+no warnings 'File::Find';
+use Digest::MD5::File qw(file_md5_hex);
+
+my $md5 = Digest::MD5->new;
+my $cfg = new Config::Simple();
+$cfg->read("$0.cfg");
+
+## Variables initialization
+die "Base directory not provided in conf" if ! $cfg->param('main.base_dir');
+die "Directory list not provided in conf" if ! $cfg->param('main.list_dir');
+
+
+&Execute_find($cfg->param('main.base_dir'), $cfg->param('main.list_dir'));
+
+##		//Subroutines//
+sub Analize_file {
+   my $File_sum;
+   my $File_type;
+   my $File = $_;
+   my $Exclude_file = join('|',split('\,',$cfg->param('main.exclude_files')));
+   $Exclude_file =~ s/\s+//g;
+   if ( ! -d $File ) {
+      return if ! -e $File;
+      return if ($Exclude_file and $File =~ m{($Exclude_file)$}i);
+      $md5->addpath("$File::Find::name");
+      $File_sum = $md5->hexdigest;
+      $File_type='link' if -l $File;
+      $File_type ||= 'reqular';
+      print "$File_sum\ttype: $File_type\t$File::Find::name\n";
+   }
+}
+
+sub Execute_find {
+   my @Search_paths;
+   my $Base_directory = $_[0];
+   my $Relative_directories = $_[1];
+   my @Relative_paths = split('\,',$Relative_directories);
+   my %Find_options = ( wanted => \&Analize_file,
+			follow_skip => '2');
+   foreach (@Relative_paths) {
+      my $Absolute_path = $Base_directory . "/$_";
+      push @Search_paths, $Absolute_path;
+   }
+
+   
+   find(\%Find_options, @Search_paths);
+}
+
+##	//END//
